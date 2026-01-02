@@ -8,34 +8,20 @@ on:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
       - name: Install Dependencies
         run: |
-          # تحديث أدوات التثبيت
-          python -m pip install --upgrade pip setuptools wheel
-          
-          # تثبيت المكتبات الأساسية من الملف
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
-          
-          # تثبيت tvDatafeed يدوياً
-          pip install https://github.com/rongardF/tvdatafeed/archive/main.zip
-          
-          # ---------------------------------------------------------
-          # الحل الجذري لـ pandas_ta (النسخ والتثبيت المحلي)
-          # ---------------------------------------------------------
-          git clone https://github.com/twopirllc/pandas-ta.git
-          cd pandas-ta
-          pip install .
-          cd ..
-          # ---------------------------------------------------------
 
       - name: Run Shark Bot
         run: python bot.py
