@@ -23,5 +23,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+          # ✅ تثبيت pandas-ta بالطريقة الصحيحة
+          pip install git+https://github.com/twopirllc/pandas-ta.git@v0.3.14b0
+
       - name: Run Shark Bot
         run: python bot.py
