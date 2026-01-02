@@ -1,0 +1,6 @@
+pandas
+pandas_ta
+numpy
+requests
+scikit-learn
+git+https://github.com/rongardF/tvdatafeed.git
