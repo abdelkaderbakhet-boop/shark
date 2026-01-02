@@ -7,15 +7,16 @@ from tvDatafeed import TvDatafeed, Interval
 from sklearn.ensemble import RandomForestClassifier
 
 # ==================== الإعدادات ====================
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "PUT_YOUR_TOKEN_HERE")
-CHAT_ID = os.getenv("CHAT_ID", "PUT_YOUR_CHAT_ID_HERE")
+# نصيحة: ضع التوكن هنا مباشرة بين العلامات "" إذا كنت لا تعرف استخدام Secrets
+TELEGRAM_TOKEN = "8466875451:AAHXwDTX5Tww-oylqzOwVSTE_XoypRfRsrI"
+CHAT_ID = "-1003552439018"
 
 SYMBOL = "XAUUSD"
 EXCHANGE = "FOREXCOM"
 TIMEFRAME = Interval.in_15_minute
-VOTE_THRESHOLD = 6
+VOTE_THRESHOLD = 4  # تم تقليلها من 6 إلى 4 لزيادة الفرص المحققة
 
-# ==================== مؤشرات يدوية (بدون pandas-ta) ====================
+# ==================== مؤشرات يدوية ====================
 
 def EMA(series, period):
     return series.ewm(span=period, adjust=False).mean()
@@ -41,11 +42,12 @@ def ATR(df, period=14):
 def send_telegram(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={
+        r = requests.post(url, data={
             "chat_id": CHAT_ID,
             "text": msg,
             "parse_mode": "HTML"
         }, timeout=10)
+        return r.json()
     except Exception as e:
         print("Telegram Error:", e)
 
@@ -55,12 +57,7 @@ def get_data():
     tv = TvDatafeed()
     for _ in range(3):
         try:
-            df = tv.get_hist(
-                symbol=SYMBOL,
-                exchange=EXCHANGE,
-                interval=TIMEFRAME,
-                n_bars=500
-            )
+            df = tv.get_hist(symbol=SYMBOL, exchange=EXCHANGE, interval=TIMEFRAME, n_bars=500)
             if df is not None and not df.empty:
                 return df
         except:
@@ -70,79 +67,82 @@ def get_data():
 # ==================== Logic ====================
 
 def analyze_and_signal():
-    print("🦈 Shark Bot Running...")
+    print("🦈 Shark Bot Running Analysis...")
 
     df = get_data()
     if df is None:
-        print("❌ No data")
+        print("❌ No data received from TradingView")
         return
 
+    # حساب المؤشرات
     df['ATR'] = ATR(df)
     df['RSI'] = RSI(df['close'])
     df['EMA200'] = EMA(df['close'], 200)
+    
+    # استراتيجية SK System (Golden Zone 50-61.8)
+    df['high_50'] = df['high'].rolling(50).max()
+    df['low_50'] = df['low'].rolling(50).min()
 
     df.dropna(inplace=True)
 
     close = df['close'].iloc[-1]
     atr = df['ATR'].iloc[-1]
+    rsi_val = df['RSI'].iloc[-1]
+    ema200_val = df['EMA200'].iloc[-1]
 
+    # حساب الأهداف (الحد الأدنى 40 بيب = 4 دولار في الذهب)
     sl_dist = max(atr * 1.5, 4.0)
-    tp_dist = sl_dist * 2
+    tp_dist = max(sl_dist * 2.0, 4.0)
 
     votes = {"BUY": 0, "SELL": 0}
     reasons = []
 
-    # RSI
-    rsi = df['RSI'].iloc[-1]
-    if rsi < 30:
-        votes["BUY"] += 1
-        reasons.append("RSI Oversold")
-    elif rsi > 70:
-        votes["SELL"] += 1
-        reasons.append("RSI Overbought")
+    # 1. RSI (1 point)
+    if rsi_val < 30:
+        votes["BUY"] += 1; reasons.append("RSI Oversold")
+    elif rsi_val > 70:
+        votes["SELL"] += 1; reasons.append("RSI Overbought")
 
-    # Trend
-    if close > df['EMA200'].iloc[-1]:
-        votes["BUY"] += 1
-        reasons.append("Above EMA200")
+    # 2. Trend (1 point)
+    if close > ema200_val:
+        votes["BUY"] += 1; reasons.append("Trend Bullish")
     else:
-        votes["SELL"] += 1
-        reasons.append("Below EMA200")
+        votes["SELL"] += 1; reasons.append("Trend Bearish")
 
-    # Simple SMC
-    try:
-        if df['high'].iloc[-3] < df['low'].iloc[-1]:
-            votes["BUY"] += 2
-            reasons.append("Bullish Imbalance")
-        elif df['low'].iloc[-3] > df['high'].iloc[-1]:
-            votes["SELL"] += 2
-            reasons.append("Bearish Imbalance")
-    except:
-        pass
+    # 3. Simple SMC (2 points)
+    if df['high'].iloc[-3] < df['low'].iloc[-1]:
+        votes["BUY"] += 2; reasons.append("SMC Bullish Imbalance")
+    elif df['low'].iloc[-3] > df['high'].iloc[-1]:
+        votes["SELL"] += 2; reasons.append("SMC Bearish Imbalance")
 
-    # AI
+    # 4. SK System - Golden Zone (2 points)
+    hi = df['high_50'].iloc[-1]
+    lo = df['low_50'].iloc[-1]
+    fib_50 = lo + (hi - lo) * 0.50
+    fib_61 = lo + (hi - lo) * 0.618
+    
+    if fib_61 <= close <= fib_50:
+        if close > ema200_val:
+            votes["BUY"] += 2; reasons.append("SK Golden Zone (Buy)")
+        else:
+            votes["SELL"] += 2; reasons.append("SK Golden Zone (Sell)")
+
+    # 5. AI Prediction (2 points)
     try:
         data = df.copy()
         data['Target'] = (data['close'].shift(-1) > data['close']).astype(int)
-        data.dropna(inplace=True)
-
-        X = data[['RSI', 'EMA200']]
-        y = data['Target']
-
+        X = data[['RSI', 'EMA200']].iloc[:-1]
+        y = data['Target'].iloc[:-1]
         model = RandomForestClassifier(n_estimators=50, max_depth=3)
-        model.fit(X[:-1], y[:-1])
-        pred = model.predict(X.iloc[[-1]])[0]
-
+        model.fit(X, y)
+        pred = model.predict(df[['RSI', 'EMA200']].iloc[[-1]])[0]
         if pred == 1:
-            votes["BUY"] += 2
-            reasons.append("AI Bullish")
+            votes["BUY"] += 2; reasons.append("AI Prediction Bullish")
         else:
-            votes["SELL"] += 2
-            reasons.append("AI Bearish")
-    except:
-        pass
+            votes["SELL"] += 2; reasons.append("AI Prediction Bearish")
+    except: pass
 
-    print(f"Votes -> BUY: {votes['BUY']} | SELL: {votes['SELL']}")
+    print(f"📊 Votes -> BUY: {votes['BUY']} | SELL: {votes['SELL']}")
 
     signal = None
     if votes["BUY"] >= VOTE_THRESHOLD:
@@ -151,9 +151,10 @@ def analyze_and_signal():
         signal = "SELL"
 
     if not signal:
-        print("No signal")
+        print("💤 No signal: Threshold not reached.")
         return
 
+    # حساب المستويات
     if signal == "BUY":
         sl = close - sl_dist
         tp = close + tp_dist
@@ -164,21 +165,23 @@ def analyze_and_signal():
         emoji = "🔴"
 
     msg = f"""
-🦈 <b>Shark Bot Alert</b>
+🦈 <b>هجوم القرش - Shark Alert</b>
 {emoji} <b>{signal} XAUUSD</b>
 
-📥 Price: {close:.2f}
-🎯 TP: {tp:.2f}
-🛑 SL: {sl:.2f}
+📥 سعر الدخول: {close:.2f}
+🎯 الهدف (TP): {tp:.2f}
+🛑 الستوب (SL): {sl:.2f}
 
-📊 Reasons:
+📊 أسباب القوة:
 {", ".join(reasons)}
+(قوة الإشارة: {votes[signal]} أصوات)
 """
 
-    send_telegram(msg)
-    print("✅ Signal sent")
-
-# ==================== Run ====================
+    result = send_telegram(msg)
+    if result and result.get("ok"):
+        print("✅ Signal sent to Telegram successfully!")
+    else:
+        print("❌ Failed to send Telegram message. Check Token/ChatID.")
 
 if __name__ == "__main__":
     analyze_and_signal()
