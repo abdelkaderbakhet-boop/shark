@@ -1,6 +1,6 @@
 pandas
-https://github.com/twopirllc/pandas-ta/archive/main.zip
 numpy
 requests
 scikit-learn
-https://github.com/rongardF/tvdatafeed/archive/main.zip
+https://github.com/twopirllc/pandas-ta/archive/refs/heads/development.zip
+https://github.com/rongardF/tvdatafeed/archive/refs/heads/main.zip
