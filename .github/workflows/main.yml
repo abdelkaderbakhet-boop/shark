@@ -2,13 +2,13 @@ name: Gold Shark Runner
 
 on:
   schedule:
-    # شغل كل 15 دقيقة
     - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # مهم جداً
 
     steps:
       - name: Checkout Code
@@ -22,9 +22,7 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-          # تثبيت المكتبات غير الموجودة على PyPI
+          pip install pandas numpy requests scikit-learn
           pip install git+https://github.com/rongardF/tvdatafeed.git
 
       - name: Run Shark Bot
