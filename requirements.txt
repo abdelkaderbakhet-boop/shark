@@ -3,5 +3,5 @@ numpy<2.0.0
 requests
 scikit-learn
 websocket-client
-pandas-ta
+pandas_ta
 tvdatafeed
