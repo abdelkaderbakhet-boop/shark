@@ -7,181 +7,101 @@ from tvDatafeed import TvDatafeed, Interval
 from sklearn.ensemble import RandomForestClassifier
 
 # ==================== الإعدادات ====================
-# نصيحة: ضع التوكن هنا مباشرة بين العلامات "" إذا كنت لا تعرف استخدام Secrets
 TELEGRAM_TOKEN = "8466875451:AAHXwDTX5Tww-oylqzOwVSTE_XoypRfRsrI"
 CHAT_ID = "-1003552439018"
-
 SYMBOL = "XAUUSD"
 EXCHANGE = "FOREXCOM"
-TIMEFRAME = Interval.in_15_minute
-VOTE_THRESHOLD = 4  # تم تقليلها من 6 إلى 4 لزيادة الفرص المحققة
+VOTE_THRESHOLD = 5 # رفعنا العتبة قليلاً لأننا نستخدم 3 فريمات (دقة أعلى)
 
 # ==================== مؤشرات يدوية ====================
-
-def EMA(series, period):
-    return series.ewm(span=period, adjust=False).mean()
-
+def EMA(series, period): return series.ewm(span=period, adjust=False).mean()
 def RSI(series, period=14):
-    delta = series.diff()
-    gain = delta.where(delta > 0, 0.0)
-    loss = -delta.where(delta < 0, 0.0)
-    avg_gain = gain.rolling(period).mean()
-    avg_loss = loss.rolling(period).mean()
+    delta = series.diff(); gain = delta.where(delta > 0, 0.0); loss = -delta.where(delta < 0, 0.0)
+    avg_gain = gain.rolling(period).mean(); avg_loss = loss.rolling(period).mean()
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
 def ATR(df, period=14):
-    high_low = df['high'] - df['low']
-    high_close = (df['high'] - df['close'].shift()).abs()
-    low_close = (df['low'] - df['close'].shift()).abs()
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    tr = pd.concat([df['high']-df['low'], (df['high']-df['close'].shift()).abs(), (df['low']-df['close'].shift()).abs()], axis=1).max(axis=1)
     return tr.rolling(period).mean()
 
 # ==================== Telegram ====================
-
 def send_telegram(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        r = requests.post(url, data={
-            "chat_id": CHAT_ID,
-            "text": msg,
-            "parse_mode": "HTML"
-        }, timeout=10)
-        return r.json()
-    except Exception as e:
-        print("Telegram Error:", e)
-
-# ==================== Data ====================
-
-def get_data():
-    tv = TvDatafeed()
-    for _ in range(3):
-        try:
-            df = tv.get_hist(symbol=SYMBOL, exchange=EXCHANGE, interval=TIMEFRAME, n_bars=500)
-            if df is not None and not df.empty:
-                return df
-        except:
-            time.sleep(1)
-    return None
-
-# ==================== Logic ====================
-
-def analyze_and_signal():
-    print("🦈 Shark Bot Running Analysis...")
-
-    df = get_data()
-    if df is None:
-        print("❌ No data received from TradingView")
-        return
-
-    # حساب المؤشرات
-    df['ATR'] = ATR(df)
-    df['RSI'] = RSI(df['close'])
-    df['EMA200'] = EMA(df['close'], 200)
-    
-    # استراتيجية SK System (Golden Zone 50-61.8)
-    df['high_50'] = df['high'].rolling(50).max()
-    df['low_50'] = df['low'].rolling(50).min()
-
-    df.dropna(inplace=True)
-
-    close = df['close'].iloc[-1]
-    atr = df['ATR'].iloc[-1]
-    rsi_val = df['RSI'].iloc[-1]
-    ema200_val = df['EMA200'].iloc[-1]
-
-    # حساب الأهداف (الحد الأدنى 40 بيب = 4 دولار في الذهب)
-    sl_dist = max(atr * 1.5, 4.0)
-    tp_dist = max(sl_dist * 2.0, 4.0)
-
-    votes = {"BUY": 0, "SELL": 0}
-    reasons = []
-
-    # 1. RSI (1 point)
-    if rsi_val < 30:
-        votes["BUY"] += 1; reasons.append("RSI Oversold")
-    elif rsi_val > 70:
-        votes["SELL"] += 1; reasons.append("RSI Overbought")
-
-    # 2. Trend (1 point)
-    if close > ema200_val:
-        votes["BUY"] += 1; reasons.append("Trend Bullish")
-    else:
-        votes["SELL"] += 1; reasons.append("Trend Bearish")
-
-    # 3. Simple SMC (2 points)
-    if df['high'].iloc[-3] < df['low'].iloc[-1]:
-        votes["BUY"] += 2; reasons.append("SMC Bullish Imbalance")
-    elif df['low'].iloc[-3] > df['high'].iloc[-1]:
-        votes["SELL"] += 2; reasons.append("SMC Bearish Imbalance")
-
-    # 4. SK System - Golden Zone (2 points)
-    hi = df['high_50'].iloc[-1]
-    lo = df['low_50'].iloc[-1]
-    fib_50 = lo + (hi - lo) * 0.50
-    fib_61 = lo + (hi - lo) * 0.618
-    
-    if fib_61 <= close <= fib_50:
-        if close > ema200_val:
-            votes["BUY"] += 2; reasons.append("SK Golden Zone (Buy)")
-        else:
-            votes["SELL"] += 2; reasons.append("SK Golden Zone (Sell)")
-
-    # 5. AI Prediction (2 points)
-    try:
-        data = df.copy()
-        data['Target'] = (data['close'].shift(-1) > data['close']).astype(int)
-        X = data[['RSI', 'EMA200']].iloc[:-1]
-        y = data['Target'].iloc[:-1]
-        model = RandomForestClassifier(n_estimators=50, max_depth=3)
-        model.fit(X, y)
-        pred = model.predict(df[['RSI', 'EMA200']].iloc[[-1]])[0]
-        if pred == 1:
-            votes["BUY"] += 2; reasons.append("AI Prediction Bullish")
-        else:
-            votes["SELL"] += 2; reasons.append("AI Prediction Bearish")
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
     except: pass
 
-    print(f"📊 Votes -> BUY: {votes['BUY']} | SELL: {votes['SELL']}")
+# ==================== Logic ====================
+def get_mtf_data(tv):
+    try:
+        df30 = tv.get_hist(SYMBOL, EXCHANGE, Interval.in_30_minute, n_bars=100)
+        df15 = tv.get_hist(SYMBOL, EXCHANGE, Interval.in_15_minute, n_bars=100)
+        df5  = tv.get_hist(SYMBOL, EXCHANGE, Interval.in_5_minute, n_bars=100)
+        return df30, df15, df5
+    except: return None, None, None
 
-    signal = None
-    if votes["BUY"] >= VOTE_THRESHOLD:
-        signal = "BUY"
-    elif votes["SELL"] >= VOTE_THRESHOLD:
-        signal = "SELL"
+def analyze():
+    tv = TvDatafeed()
+    df30, df15, df5 = get_mtf_data(tv)
+    if df5 is None or df30 is None: return
 
-    if not signal:
-        print("💤 No signal: Threshold not reached.")
-        return
+    # --- تحليل فريم 30 دقيقة (الاتجاه العام) ---
+    ema200_30 = EMA(df30['close'], 200).iloc[-1]
+    close30 = df30['close'].iloc[-1]
+    trend = "UP" if close30 > ema200_30 else "DOWN"
 
-    # حساب المستويات
-    if signal == "BUY":
-        sl = close - sl_dist
-        tp = close + tp_dist
-        emoji = "🟢"
-    else:
-        sl = close + sl_dist
-        tp = close - tp_dist
-        emoji = "🔴"
+    # --- تحليل فريم 15 دقيقة (مناطق SK/SMC) ---
+    high15 = df15['high'].rolling(50).max().iloc[-1]
+    low15 = df15['low'].rolling(50).min().iloc[-1]
+    fib_50 = low15 + (high15 - low15) * 0.50
+    fib_61 = low15 + (high15 - low15) * 0.618
+    close15 = df15['close'].iloc[-1]
 
-    msg = f"""
-🦈 <b>هجوم القرش - Shark Alert</b>
-{emoji} <b>{signal} XAUUSD</b>
+    # --- تحليل فريم 5 دقائق (الدخول اللحظي) ---
+    rsi5 = RSI(df5['close']).iloc[-1]
+    atr5 = ATR(df5).iloc[-1]
+    close5 = df5['close'].iloc[-1]
 
-📥 سعر الدخول: {close:.2f}
-🎯 الهدف (TP): {tp:.2f}
-🛑 الستوب (SL): {sl:.2f}
+    votes = 0
+    reasons = []
 
-📊 أسباب القوة:
-{", ".join(reasons)}
-(قوة الإشارة: {votes[signal]} أصوات)
-"""
+    # 1. قوة الترند (30د)
+    if trend == "UP": votes += 2; reasons.append("30m Trend Up")
+    else: votes -= 2 # عقوبة للبيع في ترند صاعد
 
-    result = send_telegram(msg)
-    if result and result.get("ok"):
-        print("✅ Signal sent to Telegram successfully!")
-    else:
-        print("❌ Failed to send Telegram message. Check Token/ChatID.")
+    # 2. منطقة SK (15د)
+    if fib_61 <= close15 <= fib_50:
+        votes += 2; reasons.append("15m Golden Zone")
 
+    # 3. RSI (5د)
+    if rsi5 < 35: votes += 1; reasons.append("5m RSI Low")
+    elif rsi5 > 65: votes -= 1
+
+    # 4. SMC Imbalance (15د)
+    if df15['high'].iloc[-3] < df15['low'].iloc[-1]:
+        votes += 2; reasons.append("15m SMC Imbalance")
+
+    print(f"[{time.strftime('%H:%M:%S')}] Price: {close5} | Votes: {votes}")
+
+    if votes >= VOTE_THRESHOLD:
+        sl = close5 - max(atr5 * 2, 4.0)
+        tp = close5 + (max(atr5 * 2, 4.0) * 2)
+        msg = f"🦈 <b>توصية شراء قوية</b>\n💎 الذهب XAUUSD\n📥 الدخول: {close5:.2f}\n🎯 الهدف: {tp:.2f}\n🛑 الستوب: {sl:.2f}\n📊 القوة: {votes} أصوات\n🔍 الأسباب: {', '.join(reasons)}"
+        send_telegram(msg)
+        return True # لمنع التكرار في نفس الدورة
+    return False
+
+# ==================== التشغيل المستمر (كل دقيقة) ====================
 if __name__ == "__main__":
-    analyze_and_signal()
+    send_telegram("🟢 <b>القرش استيقظ الآن!</b>\nجاري فحص الذهب كل دقيقة للفريمات (5, 15, 30)... 🔍")
+    
+    # حلقة تكرار لمدة 13 دقيقة (لتغطية وقت الـ 15 دقيقة في GitHub)
+    start_time = time.time()
+    while time.time() - start_time < 780: # 780 ثانية = 13 دقيقة
+        try:
+            found = analyze()
+            if found: break # إذا أرسل توصية، يتوقف وينتظر الدورة القادمة
+        except Exception as e:
+            print(f"Error: {e}")
+        time.sleep(60) # انتظر دقيقة واحدة
