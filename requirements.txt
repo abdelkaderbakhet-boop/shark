@@ -1,5 +1,6 @@
 pandas
-numpy<2.0.0
+numpy
 requests
 scikit-learn
-websocket-client
+pandas_ta
+https://github.com/rongardF/tvdatafeed/archive/refs/heads/main.zip
