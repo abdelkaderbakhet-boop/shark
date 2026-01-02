@@ -3,4 +3,3 @@ numpy<2.0.0
 requests
 scikit-learn
 websocket-client
-tvdatafeed
