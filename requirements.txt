@@ -1,6 +1,5 @@
 pandas
-numpy
+numpy<2.0.0
 requests
 scikit-learn
-pandas_ta
-https://github.com/rongardF/tvdatafeed/archive/refs/heads/main.zip
+https://github.com/rongardF/tvdatafeed/archive/main.zip
